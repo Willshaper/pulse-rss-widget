@@ -1,0 +1,34 @@
+# Built application files
+*.apk
+*.aab
+*.ap_
+*.aar
+*.dex
+*.class
+
+# Gradle / build output
+.gradle/
+build/
+app/build/
+out/
+bin/
+gen/
+
+# Local, machine-specific config (Android SDK path, etc.)
+local.properties
+
+# Signing material — NEVER commit the keystore or its passwords
+*.keystore
+*.jks
+keystore.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
