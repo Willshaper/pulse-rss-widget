@@ -10,7 +10,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-/** Fetches enabled feeds, applies per-feed keyword filters, and merges into the deduped history. */
+/** Fetches enabled feeds and merges their full contents into the deduped history (filters apply only at the widget layer, not here). */
 class FeedRepository(context: Context) {
 
     private val store = SettingsStore(context)
@@ -33,7 +33,7 @@ class FeedRepository(context: Context) {
     /** Thrown on HTTP 429/503; carries how long to back off. */
     private class RateLimited(val retryAfterMs: Long) : Exception()
 
-    /** Refresh every enabled feed and merge new (keyword-passing) items into history. */
+    /** Refresh every enabled feed and merge all new items into history (unfiltered — filters apply only to the widget view). */
     suspend fun refresh() = withContext(Dispatchers.IO) {
         val feeds = store.getFeeds().filter { it.enabled }
         val collected = ArrayList<FeedItem>()
@@ -57,13 +57,15 @@ class FeedRepository(context: Context) {
                 val parsed = RssParser.parse(result.body)
                 parsed.feedTitle?.takeIf { it.isNotBlank() }?.let { store.updateAutoTitle(feed.url, it) }
 
+                // History stores the full, unfiltered feed. Keyword and mute filters are applied
+                // only at the widget/view layer (see visibleWidgetItems), so History always
+                // reflects the true contents of the feeds.
                 val items = parsed.items
                     .filter { it.title.isNotBlank() && it.link.isNotBlank() }
-                    .filter { feed.titlePasses(it.title) }
                     .map { FeedItem(it.link, it.title, feed.url, it.timeMillis, domainOf(it.link)) }
                 collected += items
                 store.setFeedMeta(feed.url, FeedMeta(result.etag, result.lastModified, 0L))
-                Log.i(TAG, "Fetched ${feed.url} -> ${parsed.items.size} parsed, ${items.size} kept")
+                Log.i(TAG, "Fetched ${feed.url} -> ${parsed.items.size} parsed, ${items.size} stored")
             } catch (e: RateLimited) {
                 store.setFeedMeta(feed.url, meta.copy(retryAfterUntil = System.currentTimeMillis() + e.retryAfterMs))
                 Log.i(TAG, "Rate limited ${feed.url}; backing off ${e.retryAfterMs / 1000}s")

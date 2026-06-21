@@ -31,13 +31,13 @@ Most RSS apps want to be a reader. This one wants to be a **widget** — a tiny,
 **Feeds**
 - Add by URL (or auto-prepend `https://`), remove, enable/disable
 - **Custom title** per feed
-- **Per-feed keyword filter** (allow-list): only keep entries whose title contains one of your terms
-- **Global mute keywords** (deny-list): hide entries containing those words across *all* feeds
+- **Per-feed keyword filter** (allow-list): show only entries whose title contains one of your terms *(affects the widget; History stays complete)*
+- **Global mute keywords** (deny-list): hide entries containing those words across *all* feeds *(affects the widget; History stays complete)*
 - **Failed-feed indicator** — flags a feed only after repeated failures, so a transient blip doesn't cry wolf
 - **Share-to-add**: share a link from any app to Pulse to add it as a feed
 
 **History & refresh**
-- Deduplicated history of the last **1000** entries, with **search**, pull-to-refresh, and long-press-to-share
+- Deduplicated history of the last **1000** entries — the complete, unfiltered feed (filters only shape the widget), with **search**, pull-to-refresh, and long-press-to-share
 - Background refresh via WorkManager at a configurable interval (15 min – 6 h), with a **Wi-Fi-only** option
 - **Conditional requests** (ETag / If-Modified-Since) to skip unchanged feeds
 - Honors **`Retry-After`** so rate-limited feeds (e.g. Reddit) get backed off instead of hammered
@@ -63,7 +63,7 @@ Requirements: **JDK 17** and the **Android SDK (API 35)**.
 ```bash
 # clone, then:
 ./gradlew assembleRelease
-# output: app/build/outputs/apk/release/Pulse-RSS-Widget-1.0-release.apk
+# output: app/build/outputs/apk/release/Pulse-RSS-Widget-1.1-release.apk
 ```
 
 Or just open the project in **Android Studio** (it provisions the SDK and you can Run/Build from there).

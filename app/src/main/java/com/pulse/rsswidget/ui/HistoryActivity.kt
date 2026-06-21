@@ -52,8 +52,6 @@ import com.pulse.rsswidget.R
 import com.pulse.rsswidget.data.FaviconStore
 import com.pulse.rsswidget.data.FeedItem
 import com.pulse.rsswidget.data.SettingsStore
-import com.pulse.rsswidget.data.parseKeywords
-import com.pulse.rsswidget.data.titleMatchesAny
 import com.pulse.rsswidget.work.RefreshScheduler
 
 class HistoryActivity : ComponentActivity() {
@@ -78,13 +76,11 @@ private fun HistoryScreen(onBack: () -> Unit) {
     val history by store.historyFlow.collectAsState(initial = emptyList())
     val showFavicons by store.showFaviconsFlow.collectAsState(initial = true)
     val refreshing by store.refreshingFlow.collectAsState(initial = false)
-    val mute by store.muteKeywordsFlow.collectAsState(initial = "")
     var query by remember { mutableStateOf("") }
 
-    val muteWords = remember(mute) { parseKeywords(mute) }
+    // History always shows the full, unfiltered feed contents — only the search box narrows it.
     val filtered = history.filter { item ->
-        !titleMatchesAny(item.title, muteWords) &&
-            (query.isBlank() || item.title.contains(query, ignoreCase = true))
+        query.isBlank() || item.title.contains(query, ignoreCase = true)
     }
 
     fun refresh() = RefreshScheduler.refreshNow(context, showIndicator = true)
