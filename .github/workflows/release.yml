@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # full history and tags, for the release notes
 
       - uses: actions/setup-java@v6
         with:
@@ -68,7 +70,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git log -1 --format=%B "$GITHUB_REF_NAME" > notes.md
+          # Notes: every commit message since the previous tag, oldest first, plus a compare link.
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          git log --reverse --format='%B' "${prev:+$prev..}$GITHUB_REF_NAME" > notes.md
+          if [ -n "$prev" ]; then
+            echo "Full changelog: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME" >> notes.md
+          fi
           gh release create "$GITHUB_REF_NAME" "$APK" \
             --title "Pulse RSS Widget $GITHUB_REF_NAME" \
             --notes-file notes.md
