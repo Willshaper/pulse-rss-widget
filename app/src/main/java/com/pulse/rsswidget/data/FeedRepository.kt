@@ -23,15 +23,14 @@ class FeedRepository(context: Context) {
         .followSslRedirects(true)
         .build()
 
+    private val aniList = AniListSource(client)
+
     private data class FetchResult(
         val notModified: Boolean,
         val body: String,
         val etag: String?,
         val lastModified: String?
     )
-
-    /** Thrown on HTTP 429/503; carries how long to back off. */
-    private class RateLimited(val retryAfterMs: Long) : Exception()
 
     /** Refresh every enabled feed and merge all new items into history (unfiltered — filters apply only to the widget view). */
     suspend fun refresh() = withContext(Dispatchers.IO) {
@@ -47,6 +46,16 @@ class FeedRepository(context: Context) {
                 continue
             }
             try {
+                if (feed.isAniList) {
+                    val items = aniList.recentEpisodes(feed.aniListUser, feed.url)
+                    counts[feed.url] = 0
+                    anyReached = true
+                    collected += items
+                    if (meta.retryAfterUntil != 0L) store.setFeedMeta(feed.url, FeedMeta())
+                    Log.i(TAG, "Fetched AniList source -> ${items.size} episodes")
+                    continue
+                }
+
                 val result = fetch(feed.url, meta.etag, meta.lastModified)
                 counts[feed.url] = 0
                 anyReached = true
@@ -100,10 +109,15 @@ class FeedRepository(context: Context) {
         runCatching { RssParser.parse(fetch(url, null, null).body).feedTitle }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
+    /** Look up an AniList user before adding them as a source (see [AniListSource.check]). */
+    suspend fun checkAniListUser(user: String): AniListSource.UserCheck = withContext(Dispatchers.IO) {
+        aniList.check(user)
+    }
+
     private fun fetch(url: String, etag: String?, lastModified: String?): FetchResult {
         val builder = Request.Builder()
             .url(url)
-            .header("User-Agent", "Mozilla/5.0 (Android) PulseRSSWidget/1.0 (RSS reader)")
+            .header("User-Agent", USER_AGENT)
             .header("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, */*")
         if (etag != null) builder.header("If-None-Match", etag)
         if (lastModified != null) builder.header("If-Modified-Since", lastModified)
@@ -123,19 +137,25 @@ class FeedRepository(context: Context) {
         }
     }
 
-    private fun parseRetryAfterMs(header: String?): Long {
-        if (header.isNullOrBlank()) return DEFAULT_BACKOFF_MS
-        val trimmed = header.trim()
-        trimmed.toLongOrNull()?.let { return (it.coerceIn(0, MAX_BACKOFF_S) * 1000) }
-        return runCatching {
-            val date = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).parse(trimmed)
-            if (date != null) (date.time - System.currentTimeMillis()).coerceIn(0, MAX_BACKOFF_S * 1000) else DEFAULT_BACKOFF_MS
-        }.getOrDefault(DEFAULT_BACKOFF_MS)
-    }
-
     companion object {
         private const val TAG = "PulseRepo"
-        private const val DEFAULT_BACKOFF_MS = 5 * 60 * 1000L   // when no Retry-After header
-        private const val MAX_BACKOFF_S = 6 * 60 * 60L          // cap a feed's backoff at 6h
+        const val USER_AGENT = "Mozilla/5.0 (Android) PulseRSSWidget/1.0 (RSS reader)"
     }
+}
+
+/** Thrown on HTTP 429/503; carries how long to back off. */
+internal class RateLimited(val retryAfterMs: Long) : Exception()
+
+private const val DEFAULT_BACKOFF_MS = 5 * 60 * 1000L   // when no Retry-After header
+private const val MAX_BACKOFF_S = 6 * 60 * 60L          // cap a source's backoff at 6h
+
+/** Retry-After as either seconds or an HTTP date, clamped to [0, 6h]. */
+internal fun parseRetryAfterMs(header: String?): Long {
+    if (header.isNullOrBlank()) return DEFAULT_BACKOFF_MS
+    val trimmed = header.trim()
+    trimmed.toLongOrNull()?.let { return (it.coerceIn(0, MAX_BACKOFF_S) * 1000) }
+    return runCatching {
+        val date = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US).parse(trimmed)
+        if (date != null) (date.time - System.currentTimeMillis()).coerceIn(0, MAX_BACKOFF_S * 1000) else DEFAULT_BACKOFF_MS
+    }.getOrDefault(DEFAULT_BACKOFF_MS)
 }

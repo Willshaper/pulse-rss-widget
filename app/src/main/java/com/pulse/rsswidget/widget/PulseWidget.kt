@@ -46,6 +46,7 @@ import com.pulse.rsswidget.R
 import com.pulse.rsswidget.data.FaviconStore
 import com.pulse.rsswidget.data.FeedItem
 import com.pulse.rsswidget.data.SettingsStore
+import com.pulse.rsswidget.data.WidgetStyle
 import com.pulse.rsswidget.data.parseKeywords
 import com.pulse.rsswidget.data.visibleWidgetItems
 import com.pulse.rsswidget.ui.SettingsActivity
@@ -65,6 +66,7 @@ class PulseWidget : GlanceAppWidget() {
             val showFavicons by store.showFaviconsFlow.collectAsState(initial = true)
             val refreshing by store.refreshingFlow.collectAsState(initial = false)
             val mute by store.muteKeywordsFlow.collectAsState(initial = "")
+            val style by store.widgetStyleFlow.collectAsState(initial = WidgetStyle.NEUTRAL)
 
             val muteWords = remember(mute) { parseKeywords(mute) }
             val items = remember(feeds, history, muteWords) {
@@ -77,7 +79,12 @@ class PulseWidget : GlanceAppWidget() {
                     .toMap()
             }
 
-            GlanceTheme {
+            val colors = when (style) {
+                WidgetStyle.NEUTRAL -> WidgetColors.neutral
+                WidgetStyle.BLACK -> WidgetColors.black
+                WidgetStyle.WALLPAPER -> GlanceTheme.colors   // Material You: the system's wallpaper palette
+            }
+            GlanceTheme(colors = colors) {
                 WidgetBody(items, showFavicons, favicons, refreshing)
             }
         }
@@ -107,7 +114,7 @@ private fun WidgetBody(
                 }
             } else {
                 LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-                    items(items, itemId = { it.link.hashCode().toLong() }) { item ->
+                    items(items, itemId = { it.key.hashCode().toLong() }) { item ->
                         HeadlineRow(item, showFavicons, favicons[item.domain])
                     }
                 }

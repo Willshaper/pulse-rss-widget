@@ -62,9 +62,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.pulse.rsswidget.data.AniListSource
 import com.pulse.rsswidget.data.Feed
 import com.pulse.rsswidget.data.FeedRepository
 import com.pulse.rsswidget.data.SettingsStore
+import com.pulse.rsswidget.data.WidgetStyle
+import com.pulse.rsswidget.data.aniListFeedUrl
 import com.pulse.rsswidget.widget.PulseWidget
 import com.pulse.rsswidget.widget.PulseWidgetReceiver
 import com.pulse.rsswidget.widget.pulseWidgetScope
@@ -134,6 +137,7 @@ private fun SettingsScreen(onBack: () -> Unit) {
     val feeds by store.feedsFlow.collectAsState(initial = emptyList())
     val interval by store.intervalFlow.collectAsState(initial = SettingsStore.DEFAULT_INTERVAL)
     val showFavicons by store.showFaviconsFlow.collectAsState(initial = true)
+    val widgetStyle by store.widgetStyleFlow.collectAsState(initial = WidgetStyle.NEUTRAL)
     val wifiOnly by store.wifiOnlyFlow.collectAsState(initial = false)
     val failedFeeds by store.failedFeedsFlow.collectAsState(initial = emptySet())
     val lastRefresh by store.lastRefreshFlow.collectAsState(initial = 0L)
@@ -274,6 +278,19 @@ private fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
 
+            item { SectionLabel("AniList") }
+            item {
+                AniListSection(source = feeds.firstOrNull { it.isAniList }) { user ->
+                    val check = repo.checkAniListUser(user)
+                    if (check is AniListSource.UserCheck.Found) {
+                        store.addFeed(Feed(url = aniListFeedUrl(check.userName), autoTitle = "AniList · ${check.userName}"))
+                        RefreshScheduler.schedule(appContext, store.getInterval(), store.getWifiOnly())
+                        RefreshScheduler.refreshNow(appContext)
+                    }
+                    check
+                }
+            }
+
             item { SectionLabel("Options") }
             item {
                 Row(
@@ -291,6 +308,14 @@ private fun SettingsScreen(onBack: () -> Unit) {
                             }
                         }
                     )
+                }
+            }
+            item {
+                WidgetStylePicker(selected = widgetStyle) { style ->
+                    pulseWidgetScope.launch {
+                        store.setWidgetStyle(style)
+                        PulseWidget().updateAll(appContext)
+                    }
                 }
             }
             item {
@@ -401,7 +426,7 @@ private fun FeedRow(feed: Feed, failed: Boolean, onToggle: (Boolean) -> Unit, on
         Column(modifier = Modifier.weight(1f)) {
             Text(feed.displayTitle, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                feed.url,
+                if (feed.isAniList) "Airing shows on AniList (all lists except Dropped)" else feed.url,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -453,6 +478,104 @@ private fun AddFeedRow(value: String, onValueChange: (String) -> Unit, adding: B
             if (adding) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             else Icon(Icons.Filled.Add, contentDescription = "Add feed")
         }
+    }
+}
+
+/**
+ * Add the AniList source by username. Once added it lives in the feed list (toggle, rename,
+ * filter, delete), so this section then only explains what it shows.
+ */
+@Composable
+private fun AniListSection(source: Feed?, onAdd: suspend (String) -> AniListSource.UserCheck) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var user by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    if (source != null) {
+        Text(
+            "Showing new episodes of the airing shows on ${source.aniListUser}'s AniList lists (all except Dropped). " +
+                "Turn it off, rename or filter it under Feeds; delete it there to switch user.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 4.dp)
+        )
+        return
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = user,
+            onValueChange = { user = it; error = null },
+            modifier = Modifier.weight(1f),
+            singleLine = true,
+            placeholder = { Text("AniList username") }
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(
+            onClick = {
+                scope.launch {
+                    busy = true
+                    when (val result = onAdd(parseAniListUser(user))) {
+                        is AniListSource.UserCheck.Found -> {
+                            user = ""
+                            Toast.makeText(context, "AniList added: ${result.shows} current shows", Toast.LENGTH_SHORT).show()
+                        }
+                        AniListSource.UserCheck.NotFound -> error = "No AniList user by that name, or their list is private."
+                        AniListSource.UserCheck.Unreachable -> error = "Couldn't reach AniList. Try again."
+                    }
+                    busy = false
+                }
+            },
+            enabled = !busy && user.isNotBlank()
+        ) {
+            if (busy) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Icon(Icons.Filled.Add, contentDescription = "Add AniList user")
+        }
+    }
+    Text(
+        error ?: ("Adds new episodes of the airing shows on your AniList lists (all except Dropped). " +
+            "Tapping one opens the show on AniList. Your list must be public."),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+/** A bare username, or one taken from a pasted profile/list link (anilist.co/user/<name>/…). */
+private fun parseAniListUser(raw: String): String {
+    val trimmed = raw.trim()
+    Regex("anilist\\.co/user/([^/?#\\s]+)", RegexOption.IGNORE_CASE).find(trimmed)?.let { return it.groupValues[1] }
+    return trimmed.removePrefix("@")
+}
+
+@Composable
+private fun WidgetStylePicker(selected: WidgetStyle, onSelect: (WidgetStyle) -> Unit) {
+    val options = listOf(
+        WidgetStyle.NEUTRAL to "Neutral",
+        WidgetStyle.WALLPAPER to "Wallpaper",
+        WidgetStyle.BLACK to "Black"
+    )
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text("Widget colors", style = MaterialTheme.typography.bodyLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { (style, label) ->
+                FilterChip(selected = selected == style, onClick = { onSelect(style) }, label = { Text(label) })
+            }
+        }
+        Text(
+            when (selected) {
+                WidgetStyle.NEUTRAL -> "Plain gray, no wallpaper tint. Follows light/dark mode."
+                WidgetStyle.WALLPAPER -> "Material You colors taken from your wallpaper."
+                WidgetStyle.BLACK -> "Pure black, for OLED screens."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

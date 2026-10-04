@@ -20,15 +20,38 @@ data class Feed(
         val kws = keywordList()
         return kws.isEmpty() || titleMatchesAny(title, kws)
     }
+
+    /** True for the AniList source (see [aniListFeedUrl]) rather than an RSS/Atom URL. */
+    val isAniList: Boolean
+        get() = url.startsWith(ANILIST_SCHEME, ignoreCase = true)
+
+    /** The AniList username of an AniList source. */
+    val aniListUser: String
+        get() = url.substring(ANILIST_SCHEME.length)
 }
 
+/**
+ * The AniList source lives in the feed list under a pseudo-URL, so it gets enable/disable,
+ * a custom title, the keyword filter, the failure warning and backup/restore like any feed.
+ */
+const val ANILIST_SCHEME = "anilist:"
+
+fun aniListFeedUrl(user: String): String = ANILIST_SCHEME + user
+
 data class FeedItem(
-    val link: String,                // unique key used for de-duplication
+    val link: String,                // what tapping the row opens
     val title: String,
     val feedUrl: String,
     val timeMillis: Long,
-    val domain: String               // host of [link], used for the favicon
+    val domain: String,              // used for the favicon (the link's host for RSS items)
+    val key: String = link           // unique identity for de-duplication; RSS items use their link
 )
+
+/**
+ * Widget colors: NEUTRAL is plain gray with no wallpaper tint (follows light/dark mode),
+ * WALLPAPER is Material You (colors from the wallpaper), BLACK is pure black for OLED.
+ */
+enum class WidgetStyle { NEUTRAL, WALLPAPER, BLACK }
 
 /** Per-feed HTTP state: caching validators and a rate-limit backoff deadline. */
 data class FeedMeta(

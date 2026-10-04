@@ -78,16 +78,20 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * Merge new items into history, de-duplicating by link and keeping the newest [MAX_HISTORY].
+     * Merge new items into history, de-duplicating by key and keeping the newest [MAX_HISTORY].
      * The read-modify-write happens inside a single edit so concurrent refreshes can't clobber
      * each other's updates.
      */
     suspend fun mergeHistory(newItems: List<FeedItem>) {
         ds.edit { prefs ->
-            val byLink = LinkedHashMap<String, FeedItem>()
-            for (item in decodeItems(prefs[KEY_HISTORY])) byLink[item.link] = item
-            for (item in newItems) byLink.putIfAbsent(item.link, item)
-            val merged = byLink.values.sortedByDescending { it.timeMillis }.take(MAX_HISTORY)
+            val byKey = LinkedHashMap<String, FeedItem>()
+            for (item in decodeItems(prefs[KEY_HISTORY])) byKey[item.key] = item
+            for (item in newItems) {
+                // AniList episodes are re-fetched every refresh; take the fresh copy so link/title updates land.
+                if (item.feedUrl.startsWith(ANILIST_SCHEME, ignoreCase = true)) byKey[item.key] = item
+                else byKey.putIfAbsent(item.key, item)
+            }
+            val merged = byKey.values.sortedByDescending { it.timeMillis }.take(MAX_HISTORY)
             prefs[KEY_HISTORY] = encodeItems(merged)
         }
     }
@@ -100,6 +104,10 @@ class SettingsStore(context: Context) {
     val showFaviconsFlow: Flow<Boolean> = ds.data.map { it[KEY_FAVICONS] ?: true }
     suspend fun getShowFavicons(): Boolean = ds.data.first()[KEY_FAVICONS] ?: true
     suspend fun setShowFavicons(show: Boolean) = ds.edit { it[KEY_FAVICONS] = show }
+
+    val widgetStyleFlow: Flow<WidgetStyle> = ds.data.map { decodeStyle(it[KEY_WIDGET_STYLE]) }.distinctUntilChanged()
+    suspend fun getWidgetStyle(): WidgetStyle = decodeStyle(ds.data.first()[KEY_WIDGET_STYLE])
+    suspend fun setWidgetStyle(style: WidgetStyle) = ds.edit { it[KEY_WIDGET_STYLE] = style.name }
 
     // True only while a refresh is actually running. The timestamp lets the widget
     // auto-expire the overlay so it can never get stuck on.
@@ -137,6 +145,7 @@ class SettingsStore(context: Context) {
         obj.put("interval", getInterval())
         obj.put("wifiOnly", getWifiOnly())
         obj.put("showFavicons", getShowFavicons())
+        obj.put("widgetStyle", getWidgetStyle().name)
         obj.put("mute", getMuteKeywords())
         obj.put("feeds", JSONArray(encodeFeeds(getFeeds())))
         return obj.toString(2)
@@ -149,6 +158,7 @@ class SettingsStore(context: Context) {
         if (obj.has("interval")) setInterval(obj.getInt("interval"))
         if (obj.has("wifiOnly")) setWifiOnly(obj.getBoolean("wifiOnly"))
         if (obj.has("showFavicons")) setShowFavicons(obj.getBoolean("showFavicons"))
+        if (obj.has("widgetStyle")) setWidgetStyle(decodeStyle(obj.getString("widgetStyle")))
         if (obj.has("mute")) setMuteKeywords(obj.getString("mute"))
         true
     }.getOrDefault(false)
@@ -188,6 +198,10 @@ class SettingsStore(context: Context) {
         private val KEY_WIFI_ONLY = booleanPreferencesKey("wifi_only")
         private val KEY_LAST_REFRESH = longPreferencesKey("last_refresh_at")
         private val KEY_MUTE = stringPreferencesKey("mute_keywords")
+        private val KEY_WIDGET_STYLE = stringPreferencesKey("widget_style")
+
+        private fun decodeStyle(s: String?): WidgetStyle =
+            WidgetStyle.entries.firstOrNull { it.name == s } ?: WidgetStyle.NEUTRAL
 
         /** The refresh overlay never shows longer than this, even if a worker dies mid-run. */
         const val OVERLAY_TIMEOUT_MS = 30_000L
@@ -275,14 +289,14 @@ class SettingsStore(context: Context) {
         private fun encodeItems(items: List<FeedItem>): String {
             val arr = JSONArray()
             items.forEach {
-                arr.put(
-                    JSONObject()
-                        .put("link", it.link)
-                        .put("title", it.title)
-                        .put("feedUrl", it.feedUrl)
-                        .put("time", it.timeMillis)
-                        .put("domain", it.domain)
-                )
+                val o = JSONObject()
+                    .put("link", it.link)
+                    .put("title", it.title)
+                    .put("feedUrl", it.feedUrl)
+                    .put("time", it.timeMillis)
+                    .put("domain", it.domain)
+                if (it.key != it.link) o.put("key", it.key)   // RSS items' key is their link; keep storage lean
+                arr.put(o)
             }
             return arr.toString()
         }
@@ -293,12 +307,14 @@ class SettingsStore(context: Context) {
                 val arr = JSONArray(s)
                 (0 until arr.length()).map { i ->
                     val o = arr.getJSONObject(i)
+                    val link = o.getString("link")
                     FeedItem(
-                        link = o.getString("link"),
+                        link = link,
                         title = o.getString("title"),
                         feedUrl = o.optString("feedUrl", ""),
                         timeMillis = o.optLong("time", 0L),
-                        domain = o.optString("domain", "")
+                        domain = o.optString("domain", ""),
+                        key = o.optString("key", "").ifBlank { link }
                     )
                 }
             }.getOrElse { emptyList() }

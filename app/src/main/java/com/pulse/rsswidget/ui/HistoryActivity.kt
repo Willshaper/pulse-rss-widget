@@ -129,7 +129,7 @@ private fun HistoryScreen(onBack: () -> Unit) {
                             )
                         }
                     } else {
-                        items(filtered, key = { it.link }) { item ->
+                        items(filtered, key = { it.key }) { item ->
                             HistoryRow(
                                 item = item,
                                 showFavicons = showFavicons,
