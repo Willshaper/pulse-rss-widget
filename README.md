@@ -87,9 +87,13 @@ keytool -genkeypair -v -keystore app/pulse.keystore -alias pulse \
 
 To set the passwords and alias without editing the source, pass them as Gradle properties: `-PPULSE_STORE_PASSWORD=… -PPULSE_KEY_PASSWORD=… -PPULSE_KEY_ALIAS=…`.
 
+### Releases
+
+Pushing a version tag such as `v1.2.1` makes GitHub Actions build a signed APK and publish it as a release. The tag has to match `versionName`, and the workflow needs the keystore as a repository secret named `PULSE_KEYSTORE_BASE64` (the base64 of `app/pulse.keystore`).
+
 ## Install
 
-1. Sideload the APK (allow "install unknown apps" for your file manager), or run `adb install Pulse-RSS-Widget-<version>-release.apk`.
+1. Download the APK from [Releases](../../releases) and sideload it (allow "install unknown apps" for your file manager), or run `adb install Pulse-RSS-Widget-<version>-release.apk`.
 2. Long-press the home screen → **Widgets** → **Pulse RSS Widget**, or open the app and tap **Add widget to home screen**.
 3. Open settings (the ⚙ on the widget), add feed URLs, and you're set.
 
